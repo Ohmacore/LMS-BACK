@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'jitsi' => [
+        'base_url' => env('JITSI_BASE_URL', 'https://meet.jit.si'),
+    ],
+
 ];

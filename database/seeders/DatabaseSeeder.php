@@ -53,6 +53,7 @@ class DatabaseSeeder extends Seeder
             'rating' => 4.8,
             'total_students' => 150,
             'bank_account' => '0123456789',
+            'status' => 'approved',
         ]);
 
         $teacher2 = User::create([
@@ -75,6 +76,7 @@ class DatabaseSeeder extends Seeder
             'rating' => 4.9,
             'total_students' => 200,
             'bank_account' => '9876543210',
+            'status' => 'approved',
         ]);
 
         // Create Students

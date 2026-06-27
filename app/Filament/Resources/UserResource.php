@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
 use App\Models\User;
+use App\Services\NotificationService;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -61,9 +62,9 @@ class UserResource extends Resource
                         Forms\Components\Select::make('status')
                             ->label('Statut')
                             ->options([
+                                'pending' => 'En attente',
                                 'active' => 'Actif',
-                                'inactive' => 'Inactif',
-                                'banned' => 'Banni',
+                                'blocked' => 'Bloqué',
                             ])
                             ->required()
                             ->default('active'),
@@ -75,7 +76,7 @@ class UserResource extends Resource
                         Forms\Components\TextInput::make('teacher.pseudo')
                             ->label('Pseudo'),
 
-                        Forms\Components\TextInput::make('teacher.domain')
+                        Forms\Components\TextInput::make('teacher.domain_of_interest')
                             ->label('Domaine'),
 
                         Forms\Components\Select::make('teacher.status')
@@ -140,7 +141,7 @@ class UserResource extends Resource
                     ->placeholder('-')
                     ->toggleable(),
 
-                Tables\Columns\TextColumn::make('teacher.domain')
+                Tables\Columns\TextColumn::make('teacher.domain_of_interest')
                     ->label('Domaine')
                     ->placeholder('-')
                     ->toggleable(),
@@ -148,14 +149,14 @@ class UserResource extends Resource
                 Tables\Columns\BadgeColumn::make('status')
                     ->label('Statut Compte')
                     ->colors([
+                        'warning' => 'pending',
                         'success' => 'active',
-                        'warning' => 'inactive',
-                        'danger' => 'banned',
+                        'danger' => 'blocked',
                     ])
                     ->formatStateUsing(fn(string $state): string => match ($state) {
+                        'pending' => 'En attente',
                         'active' => 'Actif',
-                        'inactive' => 'Inactif',
-                        'banned' => 'Banni',
+                        'blocked' => 'Bloqué',
                         default => $state,
                     }),
 
@@ -177,9 +178,9 @@ class UserResource extends Resource
                 Tables\Filters\SelectFilter::make('status')
                     ->label('Statut Compte')
                     ->options([
+                        'pending' => 'En attente',
                         'active' => 'Actif',
-                        'inactive' => 'Inactif',
-                        'banned' => 'Banni',
+                        'blocked' => 'Bloqué',
                     ]),
 
                 Tables\Filters\Filter::make('pending_teachers')
@@ -203,8 +204,16 @@ class UserResource extends Resource
                     )
                     ->action(function (User $record) {
                         $record->teacher()->update(['status' => 'approved']);
+                        $record->update(['status' => 'active']);
 
-                        // TODO: Send email notification to teacher
+                        app(NotificationService::class)->notifyUser(
+                            $record,
+                            'teacher_approved',
+                            'Compte enseignant approuve',
+                            'Votre compte enseignant est actif. Vous pouvez publier et gerer vos modules.',
+                            [],
+                            '/teacher/dashboard'
+                        );
                     })
                     ->successNotificationTitle('Enseignant approuvé avec succès'),
 
@@ -228,8 +237,16 @@ class UserResource extends Resource
                             'status' => 'rejected',
                             'notes' => $data['rejection_reason'],
                         ]);
+                        $record->update(['status' => 'blocked']);
 
-                        // TODO: Send email notification to teacher
+                        app(NotificationService::class)->notifyUser(
+                            $record,
+                            'teacher_rejected',
+                            'Compte enseignant rejete',
+                            $data['rejection_reason'],
+                            [],
+                            '/'
+                        );
                     })
                     ->successNotificationTitle('Enseignant rejeté'),
 
@@ -240,9 +257,9 @@ class UserResource extends Resource
                     ->icon('heroicon-o-no-symbol')
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->visible(fn(User $record): bool => $record->status !== 'banned')
-                    ->action(fn(User $record) => $record->update(['status' => 'banned']))
-                    ->successNotificationTitle('Utilisateur banni'),
+                    ->visible(fn(User $record): bool => $record->status !== 'blocked')
+                    ->action(fn(User $record) => $record->update(['status' => 'blocked']))
+                    ->successNotificationTitle('Utilisateur bloqué'),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([

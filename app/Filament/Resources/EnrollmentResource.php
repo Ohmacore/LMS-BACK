@@ -54,7 +54,7 @@ class EnrollmentResource extends Resource
                             ->options([
                                 'active'   => 'Actif',
                                 'expired'  => 'Expiré',
-                                'inactive' => 'Inactif',
+                                'blocked' => 'Bloqué',
                             ])
                             ->required(),
 
@@ -119,12 +119,12 @@ class EnrollmentResource extends Resource
                     ->colors([
                         'success' => 'active',
                         'danger'  => 'expired',
-                        'warning' => 'inactive',
+                        'warning' => 'blocked',
                     ])
                     ->formatStateUsing(fn (string $state): string => match ($state) {
                         'active'   => 'Actif',
                         'expired'  => 'Expiré',
-                        'inactive' => 'Inactif',
+                        'blocked' => 'Bloqué',
                         default    => $state,
                     }),
 
@@ -153,7 +153,7 @@ class EnrollmentResource extends Resource
                     ->options([
                         'active'   => 'Actif',
                         'expired'  => 'Expiré',
-                        'inactive' => 'Inactif',
+                        'blocked' => 'Bloqué',
                     ]),
             ])
             ->actions([

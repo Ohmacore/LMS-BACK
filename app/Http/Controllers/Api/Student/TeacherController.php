@@ -14,7 +14,9 @@ class TeacherController extends Controller
      */
     public function index()
     {
-        $teachers = Teacher::with(['user', 'modules'])
+        $teachers = Teacher::with(['user', 'modules' => function ($query) {
+                $query->where('status', 'active');
+            }])
             ->whereHas('user', function ($query) {
                 $query->where('status', 'active');
             })
@@ -45,13 +47,14 @@ class TeacherController extends Controller
     {
         $teacher = Teacher::with(['user'])->findOrFail($id);
 
-        // Check if teacher is active
+        // Hide teachers whose accounts are not available to students.
         if ($teacher->user->status !== 'active') {
-            return response()->json(['message' => 'Teacher not found or inactive'], 404);
+            return response()->json(['message' => 'Teacher not found or unavailable'], 404);
         }
 
         // Load modules with chapters and sub-folders
         $modules = Module::where('teacher_id', $teacher->id)
+            ->where('status', 'active')
             ->with([
                 'folders' => function ($query) {
                     $query->whereNull('parent_folder_id')->orderBy('order');
@@ -75,6 +78,7 @@ class TeacherController extends Controller
                     'subject' => $module->subject,
                     'year' => $module->year,
                     'level' => $module->level,
+                    'status' => $module->status,
                     'description' => $module->description,
                     'total_price' => $module->total_price,
                     'chapters_count' => count($folderTree),

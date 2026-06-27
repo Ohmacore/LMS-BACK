@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Enrollment;
 use App\Models\Resource;
 use App\Models\Folder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class ResourceController extends Controller
 {
@@ -129,14 +131,68 @@ class ResourceController extends Controller
     /**
      * Get resource URL for viewing/downloading
      */
+    public function show($id)
+    {
+        $resource = Resource::with('folder.module.teacher.user', 'folder.parent')
+            ->findOrFail($id);
+
+        if (!$resource->is_public && !$this->canViewResource($resource, auth()->user())) {
+            return response()->json([
+                'message' => 'Unauthorized access to this resource'
+            ], 403);
+        }
+
+        $chapter = $this->resolveChapterFolder($resource->folder);
+
+        return response()->json([
+            'resource' => [
+                'id' => $resource->id,
+                'name' => $resource->name,
+                'type' => $resource->type,
+                'format' => $resource->format,
+                'mime_type' => $resource->mime_type,
+                'file_size' => $resource->file_size,
+                'size' => $resource->size,
+                'duration' => $resource->duration,
+                'is_public' => $resource->is_public,
+                'folder' => [
+                    'id' => $resource->folder->id,
+                    'name' => $resource->folder->name,
+                    'type' => $resource->folder->type,
+                ],
+                'chapter' => $chapter ? [
+                    'id' => $chapter->id,
+                    'name' => $chapter->name,
+                ] : null,
+                'module' => [
+                    'id' => $resource->folder->module->id,
+                    'name' => $resource->folder->module->name,
+                ],
+                'teacher' => [
+                    'id' => $resource->folder->module->teacher->id,
+                    'name' => $resource->folder->module->teacher->user->name,
+                    'pseudo' => $resource->folder->module->teacher->user->pseudo,
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Stream a resource file for inline viewing.
+     */
     public function view(Request $request, $id)
     {
-        $resource = Resource::findOrFail($id);
+        $resource = Resource::with('folder.module', 'folder.parent')
+            ->findOrFail($id);
+
+        if ($resource->is_public) {
+            return $this->serveResourceFile($resource);
+        }
 
         // Authenticate user via token in query param
         $user = null;
         if ($token = $request->query('token')) {
-            $accessToken = \Laravel\Sanctum\PersonalAccessToken::findToken($token);
+            $accessToken = PersonalAccessToken::findToken($token);
             if ($accessToken && $accessToken->tokenable) {
                 $user = $accessToken->tokenable;
             }
@@ -146,17 +202,7 @@ class ResourceController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        if ($user->teacher && $resource->folder->module->teacher_id === $user->teacher->id) {
-            // Teacher owns this resource
-            $canAccess = true;
-        } elseif ($user->student) {
-            // Check if student is enrolled
-            $canAccess = $resource->folder->module->enrollments()
-                ->where('student_id', $user->student->id)
-                ->exists(); // Simplified check, ideally check subscription type too
-        } else {
-            $canAccess = false;
-        }
+        $canAccess = $this->canViewResource($resource, $user);
 
         if (!$canAccess) {
             return response()->json([
@@ -164,12 +210,90 @@ class ResourceController extends Controller
             ], 403);
         }
 
+        return $this->serveResourceFile($resource);
+    }
+
+    private function canViewResource(Resource $resource, $user): bool
+    {
+        if ($user->teacher && $resource->folder->module->teacher_id === $user->teacher->id) {
+            return true;
+        }
+
+        if (!$user->student) {
+            return false;
+        }
+
+        $studentId = $user->student->id;
+        $moduleId = $resource->folder->module_id;
+
+        $hasFullAccess = Enrollment::where('student_id', $studentId)
+            ->where('module_id', $moduleId)
+            ->where('subscription_type', 'full')
+            ->where('status', 'active')
+            ->exists();
+
+        if ($hasFullAccess) {
+            return true;
+        }
+
+        $chapter = $this->resolveChapterFolder($resource->folder);
+        if ($chapter) {
+            $hasChapterAccess = Enrollment::where('student_id', $studentId)
+                ->where('module_id', $moduleId)
+                ->where('subscription_type', 'chapter')
+                ->where('chapter_id', $chapter->id)
+                ->where('status', 'active')
+                ->exists();
+
+            if ($hasChapterAccess) {
+                return true;
+            }
+        }
+
+        $folderType = strtolower($resource->folder->type);
+        $typeEnrollments = Enrollment::where('student_id', $studentId)
+            ->where('module_id', $moduleId)
+            ->where('subscription_type', 'type')
+            ->where('status', 'active')
+            ->get();
+
+        return $typeEnrollments->contains(function (Enrollment $enrollment) use ($folderType) {
+            $resourceTypes = is_array($enrollment->resource_types)
+                ? $enrollment->resource_types
+                : json_decode($enrollment->resource_types ?? '[]', true);
+
+            return in_array($folderType, array_map('strtolower', $resourceTypes ?? []), true);
+        });
+    }
+
+    private function resolveChapterFolder(Folder $folder): ?Folder
+    {
+        $current = $folder;
+
+        while ($current) {
+            if ($current->type === 'chapter') {
+                return $current;
+            }
+
+            $current = $current->parent;
+        }
+
+        return null;
+    }
+
+    private function serveResourceFile(Resource $resource)
+    {
         $path = Storage::disk('public')->path($resource->file_path);
 
         if (!file_exists($path)) {
             return response()->json(['message' => 'File not found'], 404);
         }
 
-        return response()->file($path);
+        $fileName = basename($resource->file_path);
+
+        return response()->file($path, [
+            'Content-Type' => $resource->mime_type ?: 'application/octet-stream',
+            'Content-Disposition' => 'inline; filename="' . addslashes($fileName) . '"',
+        ]);
     }
 }

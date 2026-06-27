@@ -55,4 +55,9 @@ class Folder extends Model
     {
         return $this->hasMany(Resource::class);
     }
+
+    public function liveSessions()
+    {
+        return $this->hasMany(LiveSession::class, 'chapter_id');
+    }
 }

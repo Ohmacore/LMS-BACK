@@ -14,6 +14,7 @@ class Module extends Model
         'level',
         'description',
         'pricing_settings',
+        'status',
     ];
 
     protected $casts = [
@@ -54,5 +55,10 @@ class Module extends Model
     public function enrollments()
     {
         return $this->hasMany(Enrollment::class);
+    }
+
+    public function liveSessions()
+    {
+        return $this->hasMany(LiveSession::class);
     }
 }

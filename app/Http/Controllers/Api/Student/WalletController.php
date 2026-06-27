@@ -16,6 +16,9 @@ class WalletController extends Controller
     public function index(Request $request)
     {
         $student = $request->user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
 
         return response()->json([
             'balance' => $student->wallet_balance,
@@ -39,6 +42,9 @@ class WalletController extends Controller
         }
 
         $student = $request->user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
 
         // Store receipt image
         $receiptPath = $request->file('receipt')->store('receipts', 'public');
@@ -70,6 +76,9 @@ class WalletController extends Controller
     public function transactions(Request $request)
     {
         $student = $request->user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
 
         $transactions = Transaction::where('student_id', $student->id)
             ->orderBy('created_at', 'desc')

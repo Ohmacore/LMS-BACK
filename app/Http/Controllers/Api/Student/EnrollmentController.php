@@ -29,7 +29,15 @@ class EnrollmentController extends Controller
         }
 
         $student = $request->user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
+
         $module = Module::findOrFail($request->module_id);
+
+        if ($module->status !== 'active') {
+            return response()->json(['message' => 'Ce module n’est pas disponible pour inscription'], 403);
+        }
 
         // Check for existing enrollment based on type
         if ($request->subscription_type === 'full') {
@@ -163,6 +171,9 @@ class EnrollmentController extends Controller
     public function index(Request $request)
     {
         $student = $request->user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
 
         $enrollments = Enrollment::with(['module.teacher.user'])
             ->where('student_id', $student->id)
@@ -200,7 +211,7 @@ class EnrollmentController extends Controller
             return response()->json(['message' => 'Only teachers can access this endpoint'], 403);
         }
 
-        $enrollments = Enrollment::with(['student.user', 'module'])
+        $enrollments = Enrollment::with(['student.user', 'module', 'chapter'])
             ->whereHas('module', function ($query) use ($teacher) {
                 $query->where('teacher_id', $teacher->id);
             })
@@ -223,6 +234,10 @@ class EnrollmentController extends Controller
                     ],
                     'subscription_type' => $enrollment->subscription_type,
                     'chapter_id' => $enrollment->chapter_id,
+                    'chapter' => $enrollment->chapter ? [
+                        'id' => $enrollment->chapter->id,
+                        'name' => $enrollment->chapter->name,
+                    ] : null,
                     'enrolled_at' => $enrollment->created_at,
                 ];
             });

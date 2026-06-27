@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Module;
+use App\Models\Transaction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ModuleController extends Controller
 {
@@ -16,6 +18,16 @@ class ModuleController extends Controller
         'college' => 4,
         'lycee' => 3,
         'universite' => 8,
+    ];
+
+    /**
+     * Teacher-controlled module lifecycle states.
+     */
+    private const STATUSES = [
+        'draft',
+        'active',
+        'paused',
+        'archived',
     ];
 
     /**
@@ -32,7 +44,10 @@ class ModuleController extends Controller
         }
 
         $modules = Module::where('teacher_id', $teacher->id)
-            ->withCount('enrollments')
+            ->withCount(['enrollments as enrollments_count' => function ($query) {
+                $query->where('status', 'active')
+                    ->select(DB::raw('count(distinct student_id)'));
+            }])
             ->withCount(['folders as chapters_count' => function ($query) {
                 $query->whereNull('parent_folder_id');
             }])
@@ -69,11 +84,24 @@ class ModuleController extends Controller
 
         $module = $query->findOrFail($id);
 
-        // If authenticated teacher owns the module, load module enrollments securely
-        if (auth()->check() && auth()->user()->teacher && auth()->user()->teacher->id === $module->teacher_id) {
+        // If authenticated teacher owns the module, load private management data securely.
+        $isOwnerTeacher = auth()->check() && auth()->user()->teacher && auth()->user()->teacher->id === $module->teacher_id;
+        if ($isOwnerTeacher) {
             $module->load(['enrollments' => function ($query) {
-                $query->where('status', 'active')->with('student.user');
+                $query->where('status', 'active')
+                    ->with(['student.user', 'chapter'])
+                    ->latest();
             }]);
+
+            $revenueQuery = Transaction::where('module_id', $module->id)
+                ->where('type', 'purchase');
+
+            $module->setAttribute('revenue_generated', abs((float) (clone $revenueQuery)
+                ->where('status', 'completed')
+                ->sum('amount')));
+            $module->setAttribute('revenue_pending', abs((float) (clone $revenueQuery)
+                ->where('status', 'pending')
+                ->sum('amount')));
         }
 
         // Check if current user is enrolled (if authenticated)
@@ -89,12 +117,31 @@ class ModuleController extends Controller
             ->where('status', 'active')
             ->distinct('student_id')
             ->count('student_id');
+        $module->setAttribute('enrollments_count', $enrollmentsCount);
 
         return response()->json([
             'module' => $module,
             'enrolled' => $enrolled,
             'enrollments_count' => $enrollmentsCount
         ]);
+    }
+
+    /**
+     * Get a teacher-owned module with full management details.
+     */
+    public function showForTeacher($id)
+    {
+        $teacher = auth()->user()->teacher;
+
+        if (!$teacher) {
+            return response()->json([
+                'message' => 'Only teachers can access this endpoint'
+            ], 403);
+        }
+
+        $module = Module::where('teacher_id', $teacher->id)->findOrFail($id);
+
+        return $this->show($module->id);
     }
 
     /**
@@ -107,6 +154,7 @@ class ModuleController extends Controller
             'description' => 'nullable|string',
             'level' => 'required|in:primaire,college,lycee,universite',
             'year' => 'required|integer|min:1',
+            'status' => 'nullable|in:' . implode(',', self::STATUSES),
         ]);
 
         // Validate year against level
@@ -141,6 +189,7 @@ class ModuleController extends Controller
             'level' => $validated['level'],
             'year' => (string) $validated['year'],
             'pricing_settings' => [],
+            'status' => $validated['status'] ?? 'draft',
         ]);
 
         // No auto-created folders — teacher will add chapters manually
@@ -173,6 +222,7 @@ class ModuleController extends Controller
             'description' => 'nullable|string',
             'level' => 'sometimes|in:primaire,college,lycee,universite',
             'year' => 'sometimes|integer|min:1',
+            'status' => 'sometimes|in:' . implode(',', self::STATUSES),
         ]);
 
         // Validate year against level if both provided
@@ -192,6 +242,7 @@ class ModuleController extends Controller
             'description' => $validated['description'] ?? null,
             'level' => $validated['level'] ?? null,
             'year' => isset($validated['year']) ? (string) $validated['year'] : null,
+            'status' => $validated['status'] ?? null,
         ], fn($value) => $value !== null);
 
         $module->update($updateData);

@@ -24,14 +24,26 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::with(['teacher', 'student'])
+            ->where('email', $request->email)
+            ->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
-        if ($user->status === 'pending') {
-            return response()->json(['message' => 'Your account is pending approval'], 403);
+        if ($user->role === 'teacher') {
+            if ($user->teacher?->status === 'rejected') {
+                return response()->json([
+                    'message' => $user->teacher->notes
+                        ? 'Your teacher account was rejected: ' . $user->teacher->notes
+                        : 'Your teacher account was rejected',
+                ], 403);
+            }
+
+            if ($user->status === 'pending' || $user->teacher?->status === 'pending') {
+                return response()->json(['message' => 'Your account is pending approval'], 403);
+            }
         }
 
         if ($user->status === 'blocked') {
@@ -43,10 +55,8 @@ class AuthController extends Controller
         // Load relationship based on role
         $userData = $user->toArray();
         if ($user->role === 'teacher') {
-            $user->load('teacher');
             $userData['teacher'] = $user->teacher;
         } elseif ($user->role === 'student') {
-            $user->load('student');
             $userData['student'] = $user->student;
         }
 
@@ -126,6 +136,7 @@ class AuthController extends Controller
             'year' => $request->year,
             'rating' => 0,
             'total_students' => 0,
+            'status' => 'pending',
         ]);
 
         return response()->json([

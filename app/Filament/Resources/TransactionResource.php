@@ -6,6 +6,7 @@ use App\Filament\Resources\TransactionResource\Pages;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Module;
+use App\Services\NotificationService;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -210,6 +211,14 @@ class TransactionResource extends Resource
                         // If it's a deposit, add to student wallet
                         if ($record->type === 'deposit') {
                             $record->student->increment('wallet_balance', $record->amount);
+                            app(NotificationService::class)->notifyUser(
+                                $record->student->user,
+                                'wallet_recharge_approved',
+                                'Recharge approuvee',
+                                "Votre recharge de {$record->amount} DZD a ete approuvee.",
+                                ['transaction_id' => $record->id],
+                                '/student/wallet'
+                            );
                         }
                     })
                     ->successNotificationTitle('Transaction validée avec succès'),
@@ -232,6 +241,17 @@ class TransactionResource extends Resource
                             'validated_at' => now(),
                             'notes' => $data['notes'],
                         ]);
+
+                        if ($record->type === 'deposit') {
+                            app(NotificationService::class)->notifyUser(
+                                $record->student->user,
+                                'wallet_recharge_rejected',
+                                'Recharge rejetee',
+                                $data['notes'],
+                                ['transaction_id' => $record->id],
+                                '/student/wallet'
+                            );
+                        }
                     })
                     ->successNotificationTitle('Transaction rejetée'),
             ])

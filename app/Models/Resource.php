@@ -31,4 +31,9 @@ class Resource extends Model
     {
         return $this->belongsTo(Folder::class);
     }
+
+    public function progress()
+    {
+        return $this->hasMany(ResourceProgress::class);
+    }
 }

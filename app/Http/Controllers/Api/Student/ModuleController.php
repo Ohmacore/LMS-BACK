@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Student;
 use App\Models\Module;
 use App\Models\Folder;
 use App\Models\Enrollment;
+use App\Models\ResourceProgress;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 
@@ -16,10 +17,14 @@ class ModuleController extends Controller
     public function index(Request $request)
     {
         $student = $request->user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
 
         $query = Module::with(['teacher.user', 'folders' => function($q) {
             $q->whereNull('parent_folder_id'); // Load only chapters for pricing
         }])
+        ->where('status', 'active')
         ->whereHas('teacher.user', function ($q) {
             $q->where('status', 'active');
         });
@@ -70,6 +75,7 @@ class ModuleController extends Controller
                 'subject' => $module->subject,
                 'year' => $module->year,
                 'level' => $module->level,
+                'status' => $module->status,
                 'description' => $module->description,
                 'total_price' => $totalPrice,
                 'remaining_price' => $remainingPrice,
@@ -106,6 +112,9 @@ class ModuleController extends Controller
         $module = Module::with(['teacher.user'])->findOrFail($id);
 
         $student = $request->user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
 
         // Get ALL active enrollments for this student + module (could have multiple chapter enrollments)
         $enrollments = Enrollment::where('student_id', $student->id)
@@ -113,8 +122,16 @@ class ModuleController extends Controller
             ->where('status', 'active')
             ->get();
 
+        if ($module->status !== 'active' && $enrollments->isEmpty()) {
+            return response()->json(['message' => 'Module not found or unavailable'], 404);
+        }
+
+        $progressByResource = ResourceProgress::where('student_id', $student->id)
+            ->get()
+            ->keyBy('resource_id');
+
         // Build folder tree with access information
-        $folderTree = $this->buildFolderTreeWithAccess($module, $enrollments);
+        $folderTree = $this->buildFolderTreeWithAccess($module, $enrollments, $progressByResource);
 
         // Calculate total stats across all chapters
         $totalStats = $this->calculateModuleStats($folderTree);
@@ -130,6 +147,7 @@ class ModuleController extends Controller
                 'subject' => $module->subject,
                 'year' => $module->year,
                 'level' => $module->level,
+                'status' => $module->status,
                 'description' => $module->description,
                 'total_price' => $module->total_price,
                 'teacher' => [
@@ -156,9 +174,17 @@ class ModuleController extends Controller
     /**
      * Get pricing options for a module — derived from actual chapter prices
      */
-    public function pricing($id)
+    public function pricing(Request $request, $id)
     {
+        if (!$request->user()->student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
+
         $module = Module::findOrFail($id);
+
+        if ($module->status !== 'active') {
+            return response()->json(['message' => 'Module not found or unavailable'], 404);
+        }
 
         // Get chapters (top-level folders) with their prices
         $chapters = $module->folders()
@@ -202,6 +228,9 @@ class ModuleController extends Controller
     public function myModules(Request $request)
     {
         $student = $request->user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Only students can access this endpoint'], 403);
+        }
 
         $enrollments = Enrollment::with(['module.teacher.user', 'module.folders'])
             ->where('student_id', $student->id)
@@ -220,6 +249,7 @@ class ModuleController extends Controller
                         'subject' => $enrollment->module->subject,
                         'year' => $enrollment->module->year,
                         'level' => $enrollment->module->level,
+                        'status' => $enrollment->module->status,
                         'total_price' => $enrollment->module->total_price,
                     ],
                     'teacher' => [
@@ -244,7 +274,7 @@ class ModuleController extends Controller
     /**
      * Build folder tree with access control information
      */
-    private function buildFolderTreeWithAccess($module, $enrollments)
+    private function buildFolderTreeWithAccess($module, $enrollments, $progressByResource)
     {
         $chapters = $module->folders()
             ->with(['children.resources', 'resources'])
@@ -252,15 +282,15 @@ class ModuleController extends Controller
             ->orderBy('order')
             ->get();
 
-        return $chapters->map(function ($chapter) use ($enrollments) {
-            return $this->formatChapterWithAccess($chapter, $enrollments);
+        return $chapters->map(function ($chapter) use ($enrollments, $progressByResource) {
+            return $this->formatChapterWithAccess($chapter, $enrollments, $progressByResource);
         });
     }
 
     /**
      * Format a chapter (top-level folder) with its sub-folders and access info
      */
-    private function formatChapterWithAccess($chapter, $enrollments)
+    private function formatChapterWithAccess($chapter, $enrollments, $progressByResource)
     {
         $hasFullAccess = $enrollments->contains('subscription_type', 'full');
         $hasChapterAccess = $enrollments->where('subscription_type', 'chapter')
@@ -273,17 +303,21 @@ class ModuleController extends Controller
             ->with('resources')
             ->orderBy('order')
             ->get()
-            ->map(function ($subFolder) use ($chapterUnlocked, $enrollments) {
+            ->map(function ($subFolder) use ($chapterUnlocked, $enrollments, $progressByResource) {
                 // Check type-based access
                 $hasTypeAccess = $enrollments->where('subscription_type', 'type')
                     ->filter(function ($e) use ($subFolder) {
-                        $types = json_decode($e->resource_types, true) ?? [];
+                        $types = is_array($e->resource_types)
+                            ? $e->resource_types
+                            : json_decode($e->resource_types ?? '[]', true);
                         return in_array($subFolder->type, $types);
                     })->isNotEmpty();
 
                 $subFolderUnlocked = $chapterUnlocked || $hasTypeAccess;
 
-                $resources = $subFolder->resources->map(function ($resource) use ($subFolderUnlocked) {
+                $resources = $subFolder->resources->map(function ($resource) use ($subFolderUnlocked, $progressByResource) {
+                    $progress = $progressByResource->get($resource->id);
+
                     return [
                         'id' => $resource->id,
                         'name' => $resource->name,
@@ -296,6 +330,11 @@ class ModuleController extends Controller
                         'is_public' => $resource->is_public,
                         'has_access' => $subFolderUnlocked || $resource->is_public,
                         'locked' => !($subFolderUnlocked || $resource->is_public),
+                        'viewed' => (bool) $progress?->viewed_at,
+                        'completed' => (bool) $progress?->completed_at,
+                        'viewed_at' => $progress?->viewed_at,
+                        'completed_at' => $progress?->completed_at,
+                        'last_position_seconds' => $progress?->last_position_seconds ?? 0,
                     ];
                 });
 

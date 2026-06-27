@@ -18,6 +18,7 @@ class Enrollment extends Model
 
     protected $casts = [
         'expires_at' => 'datetime',
+        'resource_types' => 'array',
     ];
 
     /**
