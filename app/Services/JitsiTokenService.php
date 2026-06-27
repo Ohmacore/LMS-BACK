@@ -56,7 +56,7 @@ class JitsiTokenService
                     'name' => $this->displayName($user),
                     'email' => $user->email,
                     'moderator' => $moderator,
-                    'affiliation' => $moderator ? 'teacher' : 'student',
+                    'affiliation' => $moderator ? 'owner' : 'member',
                 ],
                 'features' => [
                     'livestreaming' => false,

@@ -317,7 +317,7 @@ class CoreAccessTest extends TestCase
         $teacherPayload = $this->jwtPayloadFromUrl($teacherLaunch->json('launch_url'));
         $this->assertSame($room, $teacherPayload['room']);
         $this->assertTrue($teacherPayload['context']['user']['moderator']);
-        $this->assertSame('teacher', $teacherPayload['context']['user']['affiliation']);
+        $this->assertSame('owner', $teacherPayload['context']['user']['affiliation']);
 
         $this->assertDatabaseHas('notifications', [
             'user_id' => $studentUser->id,
@@ -338,7 +338,7 @@ class CoreAccessTest extends TestCase
         $studentPayload = $this->jwtPayloadFromUrl($studentJoin->json('join_url'));
         $this->assertSame($room, $studentPayload['room']);
         $this->assertFalse($studentPayload['context']['user']['moderator']);
-        $this->assertSame('student', $studentPayload['context']['user']['affiliation']);
+        $this->assertSame('member', $studentPayload['context']['user']['affiliation']);
 
         Sanctum::actingAs($blockedStudentUser);
 
