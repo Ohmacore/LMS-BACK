@@ -19,15 +19,16 @@ class RevenueChart extends ChartWidget
     {
         $startDate = now()->subMonths(11)->startOfMonth();
         $endDate = now()->endOfMonth();
+        $monthExpression = $this->getMonthExpression();
 
-        $transactions = Transaction::select(
-                DB::raw('abs(sum(amount)) as aggregate'),
-                DB::raw("strftime('%Y-%m', created_at) as month")
-            )
+        $transactions = Transaction::query()
+            ->selectRaw('ABS(COALESCE(SUM(amount), 0)) as aggregate')
+            ->selectRaw("{$monthExpression} as month")
             ->where('status', 'completed')
             ->where('type', 'purchase')
             ->whereBetween('created_at', [$startDate, $endDate])
-            ->groupBy('month')
+            ->groupByRaw($monthExpression)
+            ->orderBy('month')
             ->get()
             ->keyBy('month');
 
@@ -62,5 +63,14 @@ class RevenueChart extends ChartWidget
     protected function getType(): string
     {
         return 'line';
+    }
+
+    private function getMonthExpression(): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'sqlite' => "strftime('%Y-%m', created_at)",
+            'pgsql' => "TO_CHAR(created_at, 'YYYY-MM')",
+            default => "DATE_FORMAT(created_at, '%Y-%m')",
+        };
     }
 }
