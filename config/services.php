@@ -37,6 +37,9 @@ return [
 
     'jitsi' => [
         'base_url' => env('JITSI_BASE_URL', 'https://meet.jit.si'),
+        'jwt_app_id' => env('JITSI_JWT_APP_ID'),
+        'jwt_app_secret' => env('JITSI_JWT_APP_SECRET'),
+        'jwt_ttl_minutes' => (int) env('JITSI_JWT_TTL_MINUTES', 240),
     ],
 
 ];

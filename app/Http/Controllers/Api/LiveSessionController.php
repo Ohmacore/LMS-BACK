@@ -7,6 +7,7 @@ use App\Models\Folder;
 use App\Models\LiveSession;
 use App\Models\Module;
 use App\Services\AccessService;
+use App\Services\JitsiTokenService;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -15,6 +16,7 @@ class LiveSessionController extends Controller
 {
     public function __construct(
         private AccessService $accessService,
+        private JitsiTokenService $jitsiTokenService,
         private NotificationService $notificationService
     ) {
     }
@@ -114,6 +116,24 @@ class LiveSessionController extends Controller
         ]);
     }
 
+    public function launch(Request $request, LiveSession $liveSession)
+    {
+        if (!$this->teacherOwnsSession($request, $liveSession)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        if ($liveSession->status !== 'live') {
+            return response()->json(['message' => 'This live session is not live yet'], 409);
+        }
+
+        $liveSession->load('module.teacher.user', 'chapter');
+
+        return response()->json([
+            'live_session' => $this->formatSession($liveSession, $request->user()),
+            'launch_url' => $this->sessionStartUrl($liveSession, $request->user()),
+        ]);
+    }
+
     public function cancel(Request $request, LiveSession $liveSession)
     {
         if (!$this->teacherOwnsSession($request, $liveSession)) {
@@ -208,7 +228,7 @@ class LiveSessionController extends Controller
 
         return response()->json([
             'live_session' => $this->formatSession($liveSession->load('module.teacher.user', 'chapter'), $request->user()),
-            'join_url' => $this->sessionJoinUrl($liveSession),
+            'join_url' => $this->sessionJoinUrl($liveSession, $request->user()),
         ]);
     }
 
@@ -239,25 +259,25 @@ class LiveSessionController extends Controller
     private function providerUrl(string $provider, string $room): string
     {
         if ($provider === 'jitsi') {
-            return rtrim(config('services.jitsi.base_url'), '/') . '/' . rawurlencode($room);
+            return $this->jitsiTokenService->roomUrl($room);
         }
 
         return '';
     }
 
-    private function sessionJoinUrl(LiveSession $session): string
+    private function sessionJoinUrl(LiveSession $session, $user): string
     {
         if ($session->provider === 'jitsi' && $session->provider_room) {
-            return $this->providerUrl('jitsi', $session->provider_room);
+            return $this->jitsiTokenService->urlForSession($session, $user, false);
         }
 
         return $session->join_url ?: $session->zoom_join_url ?: '';
     }
 
-    private function sessionStartUrl(LiveSession $session): string
+    private function sessionStartUrl(LiveSession $session, $user): string
     {
         if ($session->provider === 'jitsi' && $session->provider_room) {
-            return $this->providerUrl('jitsi', $session->provider_room);
+            return $this->jitsiTokenService->urlForSession($session, $user, true);
         }
 
         return $session->start_url ?: $session->zoom_start_url ?: '';
@@ -266,6 +286,9 @@ class LiveSessionController extends Controller
     private function formatSession(LiveSession $session, $user): array
     {
         $session->loadMissing('module.teacher.user', 'chapter');
+        $isTeacherOwner = $user->teacher && $session->module->teacher_id === $user->teacher->id;
+        $canJoin = $session->status === 'live' && $this->accessService->canJoinLiveSession($session, $user);
+        $canLaunch = $isTeacherOwner && $session->status === 'live';
 
         return [
             'id' => $session->id,
@@ -280,11 +303,11 @@ class LiveSessionController extends Controller
             'status' => $session->status,
             'provider' => $session->provider,
             'provider_room' => $session->provider_room,
-            'join_url' => $this->sessionJoinUrl($session),
-            'start_url' => $this->sessionStartUrl($session),
+            'join_url' => ($canJoin && !$isTeacherOwner) ? $this->sessionJoinUrl($session, $user) : null,
+            'start_url' => $canLaunch ? $this->sessionStartUrl($session, $user) : null,
             'recording_url' => $session->recording_url,
             'recording_resource_id' => $session->recording_resource_id,
-            'can_join' => $session->status === 'live' && $this->accessService->canJoinLiveSession($session, $user),
+            'can_join' => $canJoin,
             'module' => [
                 'id' => $session->module->id,
                 'name' => $session->module->name,

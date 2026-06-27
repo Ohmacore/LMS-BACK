@@ -79,6 +79,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/modules/{moduleId}/live-sessions', [LiveSessionController::class, 'teacherIndex']);
         Route::post('/modules/{moduleId}/live-sessions', [LiveSessionController::class, 'store']);
         Route::post('/live-sessions/{liveSession}/start', [LiveSessionController::class, 'start']);
+        Route::post('/live-sessions/{liveSession}/launch', [LiveSessionController::class, 'launch']);
         Route::post('/live-sessions/{liveSession}/cancel', [LiveSessionController::class, 'cancel']);
         Route::post('/live-sessions/{liveSession}/complete', [LiveSessionController::class, 'complete']);
 

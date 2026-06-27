@@ -232,8 +232,16 @@ class CoreAccessTest extends TestCase
 
     public function test_live_session_schedule_start_notifications_and_student_join(): void
     {
+        config([
+            'services.jitsi.base_url' => 'https://live.test',
+            'services.jitsi.jwt_app_id' => 'ohmacore-test',
+            'services.jitsi.jwt_app_secret' => 'test-secret',
+            'services.jitsi.jwt_ttl_minutes' => 60,
+        ]);
+
         [$teacherUser, $teacher] = $this->createTeacher();
         [$studentUser, $student] = $this->createStudent(walletBalance: 1000);
+        [$blockedStudentUser] = $this->createStudent(walletBalance: 1000);
         $module = $this->createModule($teacher);
         $chapter = $this->createChapter($module);
 
@@ -257,6 +265,7 @@ class CoreAccessTest extends TestCase
             ->assertJsonPath('live_session.provider', 'jitsi');
 
         $liveSessionId = $scheduleResponse->json('live_session.id');
+        $room = $scheduleResponse->json('live_session.provider_room');
 
         $this->assertDatabaseHas('notifications', [
             'user_id' => $studentUser->id,
@@ -268,7 +277,8 @@ class CoreAccessTest extends TestCase
         $this->getJson("/api/student/modules/{$module->id}/live-sessions")
             ->assertOk()
             ->assertJsonPath('live_sessions.0.id', $liveSessionId)
-            ->assertJsonPath('live_sessions.0.can_join', false);
+            ->assertJsonPath('live_sessions.0.can_join', false)
+            ->assertJsonPath('live_sessions.0.join_url', null);
 
         $this->postJson("/api/student/live-sessions/{$liveSessionId}/join")
             ->assertStatus(409);
@@ -277,7 +287,17 @@ class CoreAccessTest extends TestCase
 
         $this->postJson("/api/teacher/live-sessions/{$liveSessionId}/start")
             ->assertOk()
-            ->assertJsonPath('live_session.status', 'live');
+            ->assertJsonPath('live_session.status', 'live')
+            ->assertJson(fn($json) => $json->whereType('live_session.start_url', 'string')->etc());
+
+        $teacherLaunch = $this->postJson("/api/teacher/live-sessions/{$liveSessionId}/launch")
+            ->assertOk()
+            ->assertJson(fn($json) => $json->whereType('launch_url', 'string')->etc());
+
+        $teacherPayload = $this->jwtPayloadFromUrl($teacherLaunch->json('launch_url'));
+        $this->assertSame($room, $teacherPayload['room']);
+        $this->assertTrue($teacherPayload['context']['user']['moderator']);
+        $this->assertSame('teacher', $teacherPayload['context']['user']['affiliation']);
 
         $this->assertDatabaseHas('notifications', [
             'user_id' => $studentUser->id,
@@ -291,6 +311,19 @@ class CoreAccessTest extends TestCase
             ->assertJsonPath('live_session.can_join', true)
             ->assertJsonPath('live_session.status', 'live')
             ->assertJson(fn($json) => $json->whereType('join_url', 'string')->etc());
+
+        $studentJoin = $this->postJson("/api/student/live-sessions/{$liveSessionId}/join")
+            ->assertOk();
+
+        $studentPayload = $this->jwtPayloadFromUrl($studentJoin->json('join_url'));
+        $this->assertSame($room, $studentPayload['room']);
+        $this->assertFalse($studentPayload['context']['user']['moderator']);
+        $this->assertSame('student', $studentPayload['context']['user']['affiliation']);
+
+        Sanctum::actingAs($blockedStudentUser);
+
+        $this->postJson("/api/student/live-sessions/{$liveSessionId}/join")
+            ->assertForbidden();
     }
 
     public function test_student_resource_progress_summary_and_continue_learning(): void
@@ -364,6 +397,17 @@ class CoreAccessTest extends TestCase
         ]);
     }
 
+    private function jwtPayloadFromUrl(string $url): array
+    {
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+        $parts = explode('.', $query['jwt'] ?? '');
+        $payload = strtr($parts[1] ?? '', '-_', '+/');
+        $payload .= str_repeat('=', (4 - strlen($payload) % 4) % 4);
+
+        return json_decode(base64_decode($payload), true);
+    }
+
     private function createTeacher(string $teacherStatus = 'approved', string $userStatus = 'active', array $overrides = []): array
     {
         $user = $this->createUser('teacher', $userStatus);
@@ -385,7 +429,7 @@ class CoreAccessTest extends TestCase
         $student = Student::create([
             'user_id' => $user->id,
             'wallet_balance' => $walletBalance,
-            'referral_code' => strtoupper(substr(str_replace('.', '', uniqid('', true)), 0, 8)),
+            'referral_code' => strtoupper(substr(md5($user->id . uniqid('', true)), 0, 8)),
         ]);
 
         return [$user, $student];
