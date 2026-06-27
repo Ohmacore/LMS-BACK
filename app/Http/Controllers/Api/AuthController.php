@@ -111,7 +111,6 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users',
             'pseudo' => 'required|string|unique:users',
             'domain_of_interest' => 'required|string',
-            'year' => 'required|string',
             'password' => 'required|min:6',
         ]);
 
@@ -133,7 +132,6 @@ class AuthController extends Controller
         $teacher = Teacher::create([
             'user_id' => $user->id,
             'domain_of_interest' => $request->domain_of_interest,
-            'year' => $request->year,
             'rating' => 0,
             'total_students' => 0,
             'status' => 'pending',

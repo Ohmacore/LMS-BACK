@@ -144,6 +144,26 @@ class CoreAccessTest extends TestCase
             ->assertJsonPath('message', 'Only students can access this endpoint');
     }
 
+    public function test_teacher_registration_does_not_require_year(): void
+    {
+        $this->postJson('/api/register/teacher', [
+            'first_name' => 'Nadia',
+            'last_name' => 'Belaid',
+            'email' => 'nadia.belaid@example.com',
+            'pseudo' => 'prof_nadia',
+            'domain_of_interest' => 'Physique',
+            'password' => 'password',
+        ])->assertCreated()
+            ->assertJsonPath('teacher.status', 'pending')
+            ->assertJsonPath('teacher.year', null);
+
+        $this->assertDatabaseHas('users', [
+            'email' => 'nadia.belaid@example.com',
+            'role' => 'teacher',
+            'status' => 'pending',
+        ]);
+    }
+
     public function test_student_can_buy_a_chapter_and_cannot_buy_it_twice(): void
     {
         [, $teacher] = $this->createTeacher();
