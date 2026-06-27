@@ -279,13 +279,34 @@ pm2 restart lms-frontend
 
 ## 10. Live Classes
 
-For a free MVP, self-host Jitsi Meet later and set:
+For a free MVP, self-host Jitsi Meet and set the backend live provider values:
 
 ```env
 JITSI_BASE_URL=https://live.example.com
+JITSI_JWT_APP_ID=your-app-id
+JITSI_JWT_APP_SECRET=your-shared-secret
+JITSI_JWT_TTL_MINUTES=240
 ```
 
 Do not use `https://meet.jit.si` for production embedded live classes; it is demo-oriented and can disconnect sessions.
+
+Recommended docker-jitsi-meet `.env` values:
+
+```env
+ENABLE_AUTH=1
+ENABLE_GUESTS=0
+AUTH_TYPE=jwt
+JWT_APP_ID=your-app-id
+JWT_APP_SECRET=your-shared-secret
+JWT_ACCEPTED_ISSUERS=your-app-id
+JWT_ACCEPTED_AUDIENCES=jitsi
+XMPP_MUC_MODULES=token_affiliation
+ENABLE_AUTO_OWNER=0
+ENABLE_MODERATOR_CHECKS=1
+DISABLE_DEEP_LINKING=1
+```
+
+`token_affiliation` keeps teachers as moderators and students as participants. `ENABLE_AUTO_OWNER=0` prevents the first student in an empty room from becoming moderator.
 
 Recommended production live defaults:
 
@@ -295,8 +316,6 @@ Recommended production live defaults:
 - Reminder notification is sent 15 minutes before start.
 - Students join muted by default.
 - Keep recording disabled for MVP unless storage and privacy rules are ready.
-
-For stricter moderator control later, evaluate LiveKit or Jitsi JWT authentication.
 
 ## 11. Deploy Updates
 
