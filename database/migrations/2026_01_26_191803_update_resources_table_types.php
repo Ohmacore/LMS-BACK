@@ -11,18 +11,28 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        // For SQLite, we need to recreate the table
-        // For MySQL/PostgreSQL, we could use ALTER TABLE
-
-        // Drop the old type column constraint and recreate
         Schema::table('resources', function (Blueprint $table) {
-            // Add new columns we need
             $table->string('mime_type')->nullable()->after('file_path');
             $table->bigInteger('file_size')->nullable()->after('mime_type');
         });
 
-        // For SQLite, we need to work around the enum limitation
-        // We'll change the type column manually using raw SQL
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE resources MODIFY type VARCHAR(20) NOT NULL DEFAULT 'other'");
+            DB::statement("
+                UPDATE resources
+                SET type = CASE
+                    WHEN type = 'fiche' THEN 'cours'
+                    WHEN type = 'enonce' THEN 'TD'
+                    WHEN type = 'corrige' THEN 'TP'
+                    WHEN type = 'video' THEN 'exam'
+                    ELSE 'other'
+                END
+            ");
+            DB::statement("ALTER TABLE resources MODIFY type ENUM('cours', 'TD', 'TP', 'exam', 'other') NOT NULL DEFAULT 'other'");
+
+            return;
+        }
+
         DB::statement("
             CREATE TABLE resources_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +78,27 @@ return new class extends Migration {
      */
     public function down(): void
     {
-        // Reverse: change back to old types
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE resources MODIFY type VARCHAR(20) NOT NULL DEFAULT 'other'");
+            DB::statement("
+                UPDATE resources
+                SET type = CASE
+                    WHEN type = 'cours' THEN 'fiche'
+                    WHEN type = 'TD' THEN 'enonce'
+                    WHEN type = 'TP' THEN 'corrige'
+                    WHEN type = 'exam' THEN 'video'
+                    ELSE 'other'
+                END
+            ");
+            DB::statement("ALTER TABLE resources MODIFY type ENUM('fiche', 'enonce', 'corrige', 'video', 'other') NOT NULL DEFAULT 'other'");
+
+            Schema::table('resources', function (Blueprint $table) {
+                $table->dropColumn(['mime_type', 'file_size']);
+            });
+
+            return;
+        }
+
         DB::statement("
             CREATE TABLE resources_old (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
